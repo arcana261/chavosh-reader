@@ -399,7 +399,8 @@ class LeveledCollectingTokenStatItem(CollectingTokenStatItem):
         if item_type == StatItem.DECIDING:
             new_level = self._cube.get(related_token) + 1
             if token in self._cube:
-                raise ValueError()
+                prev_level = self._cube.get(token)
+                self.levels.decrement(prev_level)
             self._cube.set(token, new_level)
             self.levels.increment(new_level)
 
@@ -421,7 +422,8 @@ class LeveledCollectingTokenReasonStatItem(CollectingTokenReasonStatItem):
         if item_type == StatItem.DECIDING:
             new_level = self._cube.get(related_token) + 1
             if token in self._cube:
-                raise ValueError()
+                prev_level = self._cube.get(token)
+                self.levels.decrement(prev_level)
             self._cube.set(token, new_level)
             self.levels.increment(new_level)
 
