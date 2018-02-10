@@ -186,7 +186,22 @@ def read(seq):
             if h == 'SimilarPostTokens':
                 if len(v) > 0:
                     v = v.replace('<OngoingPost: ', "'").replace('>', "'")
-                    similar_post_tokens = ast.literal_eval(v)
+                    try:
+                        similar_post_tokens = ast.literal_eval(v)
+                    except:
+                        t = token = result = reviewer_reject_reason_id = similar_post_tokens = None
+                        is_system = is_bot = False
+                        lines = []
+                        step = 0
+
+                        logger.error('failed to parse SimilarPostTokens: value %s in line %d with content %s' % (v, line_number, line))
+
+                        index = v.rfind('Time:')
+                        if index >= 0:
+                            v = v[index:]
+                            t = parser.parse(_split(v)[1])
+                            lines.append(v)
+                            step = 1
                 else:
                     similar_post_tokens = []
 
