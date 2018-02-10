@@ -29,7 +29,11 @@ def read(seq):
         if line == '':
             continue
 
-        h, v = _split(line)
+        try:
+            h, v = _split(line)
+        except ValueError:
+            logger.error('could not unpack by : in line (%d) with value %s' % (line_number, line))
+            continue
 
         if step == 0:
             if h == 'Time':
