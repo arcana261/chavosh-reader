@@ -132,14 +132,14 @@ def list_file(input, tokens=False):
         print()
 
 
-def filter_date_pipe(input, date):
+def filter_date_pipe(input, from_date, to_date):
     logger.info('opening input file %s' % input)
     with open(input) as f:
         logger.info('file opened')
         data = reader.read(f)
 
         for log in data:
-            if log.time >= date:
+            if log.time >= from_date and (not to_date or log.time < to_date):
                 for line in log.lines:
                     print(line)
 
@@ -157,4 +157,4 @@ elif argv[1] == 'filter-similarfilter-reviewer-rejected-accept':
 elif argv[1] == 'list':
     list_file(argv[2], '--token' in argv[3:])
 elif argv[1] == 'filter-date-pipe':
-    filter_date_pipe(argv[2], parser.parse(argv[3]))
+    filter_date_pipe(argv[2], parser.parse(argv[3]), parser.parse(argv[4]) if len(argv) >= 5 and argv[4] else None)
