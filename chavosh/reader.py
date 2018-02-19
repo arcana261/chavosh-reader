@@ -114,6 +114,9 @@ def read(seq):
                                 val.reject_reason_id = decision['reject_reason_id']
                             result.decision = val
 
+                            if val.judge == 'duplicate':
+                                val.judge = 'reject'
+
                         if 'filters' in d:
                             filters = d['filters']
                             val = chavosh.models.Filters()
@@ -134,6 +137,9 @@ def read(seq):
                                     x.review_reason = similar_filter['review_reason']
                                 if 'debug' in similar_filter:
                                     x.debug = similar_filter['debug']
+
+                                if x.judge == 'duplicate':
+                                    x.judge = 'reject'
 
                                 val.similar_filter = x
 

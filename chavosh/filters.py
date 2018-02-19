@@ -287,6 +287,40 @@ class StatItem:
         })
 
 
+class CollectingReviewerStatItem(StatItem):
+    def __init__(self, item_type):
+        super(CollectingReviewerStatItem, self).__init__()
+        self.total = 0
+        self.reviewer = 0
+        self.bot = 0
+        self.system = 0
+        self.bots = MemoryCube()
+        self.item_type = item_type
+
+    def add_reviewer(self, item_type, is_bot, is_system, deciding_entity):
+        super(CollectingReviewerStatItem, self).add(item_type)
+
+        if item_type == self.item_type:
+            self.total = self.total + 1
+            if is_system:
+                self.system = self.system + 1
+            elif is_bot:
+                self.bot = self.bot + 1
+                self.bots.increment(deciding_entity if deciding_entity else 'other')
+            else:
+                self.reviewer = self.reviewer + 1
+
+    def __pretify__(self, indent):
+        return _pretify(indent, {
+            'stats': super(CollectingReviewerStatItem, self).__pretify__(indent + ' '),
+            'total': self.total,
+            'reviewer': self.reviewer,
+            'bot': self.bot,
+            'system': self.system,
+            'bots': self.bots
+        })
+
+
 class CollectingTokenStatItem(StatItem):
     def __init__(self, collect_type):
         super(CollectingTokenStatItem, self).__init__()
@@ -331,6 +365,22 @@ class CollectingReasonStatItem(StatItem):
             'neutralized-reasons': self.neutralized_reasons,
             'masked-reasons': self.masked_reasons,
             'deciding-reasons': self.deciding_reasons,
+        })
+
+
+class CollectingReviewerReasonStatItem(CollectingReviewerStatItem):
+    def __init__(self, item_type):
+        super(CollectingReviewerReasonStatItem, self).__init__(item_type)
+        self.reasons = CollectingReasonStatItem()
+
+    def add_reviewer_reason(self, item_type, is_bot, is_system, deciding_entity, reason):
+        super(CollectingReviewerReasonStatItem, self).add_reviewer(item_type, is_bot, is_system, deciding_entity)
+        self.reasons.add_reason(item_type, reason)
+
+    def __pretify__(self, indent):
+        return _pretify(indent, {
+            'stats': super(CollectingReviewerReasonStatItem, self).__pretify__(indent + ' '),
+            'reasons': self.reasons.__pretify__(indent + ' ')
         })
 
 
@@ -436,13 +486,17 @@ class LeveledCollectingTokenReasonStatItem(CollectingTokenReasonStatItem):
 
 class AbstractStatFilter:
     class StatFilterData:
-        def __init__(self, item_type, judge, reject_reason, deciding, neutralized, related_token, **kwargs):
+        def __init__(self, item_type, judge, reject_reason, deciding, neutralized, related_token, is_bot, is_system,
+                     reviewer_entity, **kwargs):
             self.item_type = item_type
             self.judge = judge
             self.reject_reason = reject_reason
             self.deciding = deciding
             self.neutralized = neutralized
             self.related_token = related_token
+            self.is_bot = is_bot
+            self.is_system = is_system
+            self.reviewer_entity = reviewer_entity
             self.args = kwargs
 
     def __init__(self, total, accept, reject, duplicate, neutral, none):
@@ -465,6 +519,11 @@ class AbstractStatFilter:
             collector.add_reason(data.item_type, data.reject_reason)
         elif isinstance(collector, CollectingTokenStatItem):
             collector.add_token(data.item_type, log.token)
+        elif isinstance(collector, CollectingReviewerReasonStatItem):
+            collector.add_reviewer_reason(data.item_type, data.is_bot, data.is_system, data.reviewer_entity,
+                                          data.reject_reason)
+        elif isinstance(collector, CollectingReviewerStatItem):
+            collector.add_reviewer(data.item_type, data.is_bot, data.is_system, data.reviewer_entity)
         elif isinstance(collector, StatItem):
             collector.add(data.item_type)
         else:
@@ -550,6 +609,10 @@ class BaseFilterStats(AbstractStatFilter):
             neutralized = False
             deciding = False
 
+        reviewer_entity = None
+        if log.result and log.result.decision:
+            reviewer_entity = log.result.decision.filter
+
         if ignore:
             item_type = StatItem.IGNORE
         elif neutralized:
@@ -561,7 +624,8 @@ class BaseFilterStats(AbstractStatFilter):
 
         related_token = self._get_related_token(log, f)
 
-        return AbstractStatFilter.StatFilterData(item_type, judge, reject_reason, deciding, neutralized, related_token)
+        return AbstractStatFilter.StatFilterData(item_type, judge, reject_reason, deciding, neutralized, related_token,
+                                                 log.is_bot, log.is_system, reviewer_entity)
 
 
 class BaseStatSimilarFilter(BaseFilterStats):
@@ -604,7 +668,8 @@ class BaseReviewerStats(AbstractStatFilter):
         item_type = StatItem.DECIDING
         related_token = None
 
-        return AbstractStatFilter.StatFilterData(item_type, judge, reject_reason, deciding, neutralized, related_token)
+        return AbstractStatFilter.StatFilterData(item_type, judge, reject_reason, deciding, neutralized, related_token,
+                                                 is_bot=False, is_system=False, reviewer_entity=None)
 
 
 class ReviewerActionedBotStats(BaseReviewerStats):
@@ -648,18 +713,6 @@ class StatSimilarFilter:
     def __init__(self):
         self.stats = BaseStatSimilarFilter()
         self._marks = BigSet()
-        self.reviewer_rejected_accept = ReviewerActionedBotStats(self._marks, self.stats, StatItem(), StatItem(),
-                                                                 CollectingReasonStatItem(), StatItem(), StatItem(),
-                                                                 StatItem(), judge='accept', action='reject')
-        self.reviewer_rejected_reject = ReviewerActionedBotStats(self._marks, self.stats, StatItem(), StatItem(),
-                                                                 CollectingReasonStatItem(), StatItem(), StatItem(),
-                                                                 StatItem(), judge='reject', action='reject')
-        self.reviewer_accepted_accept = ReviewerActionedBotStats(self._marks, self.stats, StatItem(), StatItem(),
-                                                                 CollectingReasonStatItem(), StatItem(), StatItem(),
-                                                                 StatItem(), judge='accept', action='accept')
-        self.reviewer_accepted_reject = ReviewerActionedBotStats(self._marks, self.stats, StatItem(), StatItem(),
-                                                                 CollectingReasonStatItem(), StatItem(), StatItem(),
-                                                                 StatItem(), judge='reject', action='accept')
 
     def filter_has(self, seq):
         for log in seq:
@@ -690,17 +743,11 @@ class StatSimilarFilter:
     def collect(self, seq):
         for log in seq:
             self.stats.inject_record(log)
-            self.reviewer_rejected_accept.inject_record(log)
-            self.reviewer_rejected_reject.inject_record(log)
             yield log
 
     def __pretify__(self, indent):
         return _pretify(indent, {
             'stats': self.stats,
-            'reviewer-rejected-accept': self.reviewer_rejected_accept,
-            'reviewer-rejected-reject': self.reviewer_rejected_reject,
-            'reviewer-accepted-accept': self.reviewer_accepted_accept,
-            'reviewer-accepted-reject': self.reviewer_accepted_reject,
         })
 
     def __str__(self):
@@ -709,11 +756,12 @@ class StatSimilarFilter:
 
 class DecisionStats(AbstractStatFilter):
     def __init__(self):
-        super(DecisionStats, self).__init__(StatItem(), StatItem(), CollectingReasonStatItem(), StatItem(), StatItem(),
+        super(DecisionStats, self).__init__(StatItem(), CollectingReviewerStatItem(StatItem.DECIDING),
+                                            CollectingReviewerReasonStatItem(StatItem.DECIDING), StatItem(), StatItem(),
                                             StatItem())
 
     def _can_filter(self, log):
-        return log.is_bot and log.result and log.result.decision and log.result.decision.judge
+        return log.is_bot and (not log.is_system) and log.result and log.result.decision and log.result.decision.judge
 
     def _get_data(self, log):
         ignore = log.result.decision.ignore
@@ -737,7 +785,9 @@ class DecisionStats(AbstractStatFilter):
 
         related_token = None
 
-        return AbstractStatFilter.StatFilterData(item_type, judge, reject_reason, deciding, neutralized, related_token)
+        return AbstractStatFilter.StatFilterData(item_type, judge, reject_reason, deciding, neutralized, related_token,
+                                                 is_bot=True, is_system=False,
+                                                 reviewer_entity=log.result.decision.filter)
 
 
 class ReviewerStats(BaseReviewerStats):
